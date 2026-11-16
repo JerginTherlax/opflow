@@ -1,0 +1,1389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0f0f0f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Flow">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://api.tradier.com wss://ws.tradier.com; img-src data: blob:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>Live Options Flow</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #0f0f0f 0%, #1a1a2e 50%, #0f0f0f 100%);
+    padding: 20px;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, Menlo, 'Roboto Mono', monospace;
+    color: #e0e0e0;
+  }
+  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #333; }
+  .header h1 { font-size: 26px; font-weight: 700; color: #fff; }
+  .header h1 .accent { color: #10b981; }
+  .header .sub { color: #666; font-size: 11px; margin-top: 4px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .status-streaming { background: #10b981; animation: pulse 2s infinite; }
+  .status-connecting { background: #f59e0b; animation: pulse 1s infinite; }
+  .status-error { background: #ef4444; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* Chart container */
+  .chart-container {
+    background: #1a1a1a; border-radius: 12px; padding: 16px; margin-bottom: 16px;
+    border: 1px solid #333; position: relative;
+  }
+  .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .chart-header .title { font-size: 13px; font-weight: 600; color: #fff; }
+  .chart-header .price-live { font-size: 22px; font-weight: 700; color: #fff; }
+  .chart-legend { display: flex; gap: 14px; font-size: 9px; color: #888; }
+  .chart-legend span { display: flex; align-items: center; gap: 4px; }
+  .chart-legend .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  #priceCanvas { width: 100%; border-radius: 6px; cursor: crosshair; touch-action: pan-y; }
+  #volumeCanvas { width: 100%; border-radius: 6px; margin-top: 2px; }
+
+  /* Chart toggles */
+  .chart-toggles { display: flex; gap: 2px; background: #111; border-radius: 6px; padding: 2px; border: 1px solid #333; }
+  .chart-toggle {
+    padding: 3px 10px; border-radius: 4px; font-size: 10px; font-weight: 600;
+    cursor: pointer; color: #888; transition: all 0.2s;
+  }
+  .chart-toggle:hover { color: #ccc; }
+  .chart-toggle.active { background: #818cf8; color: #fff; }
+
+  .stats-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 16px; }
+  .stat-card { background: #1a1a1a; border-radius: 8px; padding: 12px; border: 1px solid #333; }
+  .stat-card .label { font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-card .value { font-size: 18px; font-weight: 700; margin-top: 3px; }
+
+  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .panel { background: #1a1a1a; border-radius: 12px; padding: 16px; border: 1px solid #333; }
+  .panel h2 { font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+
+  .dte-tabs { display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+  .dte-tab {
+    padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;
+    cursor: pointer; border: 1px solid #333; background: #111; color: #888; transition: all 0.2s;
+  }
+  .dte-tab:hover { border-color: #555; color: #ccc; }
+  .dte-tab.active { background: #6366f1; border-color: #6366f1; color: #fff; }
+  .dte-tab .vol-hint { font-size: 8px; font-weight: 400; color: #999; margin-left: 4px; }
+  .dte-tab.active .vol-hint { color: #c7c7ff; }
+
+  .strike-row { display: grid; grid-template-columns: 55px 1fr 50px 1fr 55px 55px; gap: 6px; padding: 5px 0; font-size: 10px; border-bottom: 1px solid #222; align-items: center; }
+  .strike-header { display: grid; grid-template-columns: 55px 1fr 50px 1fr 55px 55px; gap: 6px; padding: 5px 0; font-size: 10px; border-bottom: 1px solid #333; color: #666; text-transform: uppercase; }
+  .pct-bar-outer { height: 18px; background: #ef444430; border-radius: 3px; overflow: hidden; position: relative; }
+  .pct-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+  .pct-bar-label { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 600; color: #fff; text-shadow: 0 0 3px rgba(0,0,0,0.8); }
+
+  .trades-scroll { max-height: 550px; overflow-y: auto; }
+  .trades-scroll::-webkit-scrollbar { width: 6px; }
+  .trades-scroll::-webkit-scrollbar-track { background: #111; }
+  .trades-scroll::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+  .trade-row { display: grid; grid-template-columns: 56px 36px 50px 36px 40px 50px 58px 36px; gap: 4px; padding: 4px 0; font-size: 10px; border-bottom: 1px solid #1a1a1a; align-items: center; }
+  .trade-header { display: grid; grid-template-columns: 56px 36px 50px 36px 40px 50px 58px 36px; gap: 4px; padding: 5px 0; font-size: 10px; border-bottom: 1px solid #333; color: #666; text-transform: uppercase; position: sticky; top: 0; background: #1a1a1a; z-index: 1; }
+
+  .badge { padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 600; text-align: center; text-transform: uppercase; display: inline-block; }
+  .badge-buy { background: #10b98130; color: #10b981; }
+  .badge-sell { background: #ef444430; color: #ef4444; }
+  .badge-neutral { background: #88888830; color: #888; }
+  .badge-call { background: #10b98120; color: #10b981; }
+  .badge-put { background: #ef444420; color: #ef4444; }
+  .badge-dte { background: #6366f120; color: #a5b4fc; font-size: 8px; padding: 1px 4px; }
+
+  /* Pinned trades */
+  .pinned-section { margin-bottom: 8px; }
+  .pinned-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 11px; color: #f59e0b; font-weight: 600; }
+  .pinned-row {
+    display: grid; grid-template-columns: 56px 36px 50px 36px 40px 50px 58px 36px 20px;
+    gap: 4px; padding: 4px 6px; font-size: 10px; align-items: center;
+    background: #f59e0b08; border: 1px solid #f59e0b30; border-radius: 4px; margin-bottom: 3px;
+  }
+  .pin-x { cursor: pointer; color: #666; font-size: 12px; text-align: center; }
+  .pin-x:hover { color: #ef4444; }
+
+  /* Clickable trade rows */
+  .trade-row { cursor: pointer; transition: background 0.15s; }
+  .trade-row:hover { background: #ffffff08 !important; }
+
+  /* Pause button */
+  .pause-btn {
+    padding: 3px 10px; border-radius: 5px; font-size: 10px; font-weight: 600;
+    cursor: pointer; border: 1px solid #333; background: #111; color: #888;
+    transition: all 0.2s; margin-left: 8px;
+  }
+  .pause-btn:hover { border-color: #555; color: #ccc; }
+  .pause-btn.paused { background: #ef444430; border-color: #ef4444; color: #ef4444; }
+
+  .footer { padding: 12px; background: #1a1a1a; border-radius: 8px; border: 1px solid #333; font-size: 10px; color: #666; }
+  .footer strong { color: #888; }
+  @media (max-width: 900px) { .stats-grid { grid-template-columns: repeat(3, 1fr); } .panels { grid-template-columns: 1fr; } }
+
+  /* ─── Phone layout ─── */
+  @media (max-width: 640px) {
+    body {
+      padding: 10px;
+      padding-top: calc(10px + env(safe-area-inset-top, 0px));
+      padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+      padding-left: calc(10px + env(safe-area-inset-left, 0px));
+      padding-right: calc(10px + env(safe-area-inset-right, 0px));
+      -webkit-text-size-adjust: 100%;
+    }
+    .hide-sm { display: none; }
+
+    .header { margin-bottom: 10px; padding-bottom: 8px; gap: 10px; }
+    .header h1 { font-size: 18px; }
+    .header .sub { font-size: 10px; line-height: 1.5; }
+
+    .chart-container { padding: 10px; margin-bottom: 10px; border-radius: 10px; }
+    .chart-header { align-items: flex-start; gap: 8px; }
+    .chart-head-left { flex-wrap: wrap; flex: 1; min-width: 0; row-gap: 8px; }
+    .chart-legend { flex-basis: 100%; flex-wrap: wrap; gap: 4px 12px; font-size: 10px; }
+    .chart-toggle { padding: 8px 14px; font-size: 12px; }
+
+    .stats-grid { gap: 6px; margin-bottom: 10px; }
+    .stat-card { padding: 8px; }
+    .stat-card .label { font-size: 9px; letter-spacing: 0; }
+    .stat-card .value { font-size: 16px; }
+
+    .panels { gap: 10px; margin-bottom: 10px; }
+    .panel { padding: 10px; border-radius: 10px; }
+    .panel h2 { flex-wrap: wrap; }
+
+    .dte-tab { padding: 8px 12px; font-size: 12px; }
+    .dte-tab .vol-hint { font-size: 9px; }
+
+    .strike-row, .strike-header { grid-template-columns: 50px minmax(0, 1fr) 42px minmax(0, 1fr) 50px 50px; gap: 4px; }
+    .strike-row { padding: 7px 0; }
+    .strike-header { font-size: 8px; }
+    .pct-bar-outer { height: 20px; }
+
+    .trades-scroll { max-height: 60vh; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+    .trade-row, .trade-header {
+      grid-template-columns: 54px 34px minmax(0, .9fr) 46px minmax(0, .8fr) minmax(0, 1fr) minmax(0, 1.4fr) 26px;
+      gap: 3px;
+    }
+    .trade-row { padding: 9px 0; font-size: 11px; }
+    .trade-header { font-size: 9px; }
+    .pinned-row {
+      grid-template-columns: 50px 32px minmax(0, .9fr) 44px minmax(0, .8fr) minmax(0, 1fr) minmax(0, 1.4fr) 24px 24px;
+      gap: 3px; padding: 7px 3px; font-size: 10px;
+    }
+    .pinned-list { max-height: 34vh; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+    .pinned-row > div:first-child { line-height: 1.25; }
+    .auto-tag { display: block; margin-left: 0 !important; }
+    .badge { padding: 1px 3px; }
+    .pin-x { font-size: 16px; line-height: 28px; }
+    .pause-btn { padding: 8px 12px; font-size: 11px; }
+    .clear-pins { padding: 7px 10px !important; font-size: 10px !important; }
+
+    .footer { font-size: 10px; line-height: 1.5; }
+  }
+  /* Narrowest phones: pinned rows drop the per-contract price so premium still fits */
+  @media (max-width: 375px) {
+    .pinned-row { grid-template-columns: 50px 32px minmax(0, .9fr) 44px minmax(0, .8fr) minmax(0, 1.4fr) 24px 24px; }
+    .pinned-row > div:nth-child(6) { display: none; }
+    .trade-header { font-size: 8px; }
+  }
+  @media (max-width: 340px) {
+    .trade-row, .trade-header { grid-template-columns: 50px 32px minmax(0, .9fr) 44px minmax(0, .8fr) minmax(0, 1.4fr) 24px; }
+    .trade-row > div:nth-child(6), .trade-header > div:nth-child(6) { display: none; }
+    .trade-row { font-size: 10px; }
+    .pinned-row { gap: 2px; padding: 7px 2px; }
+  }
+  /* Toolbar, settings sheet, connection log */
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tool-btn { padding: 8px 14px; min-height: 36px; border-radius: 6px; font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; border: 1px solid #333; background: #111; color: #aaa; }
+  .tool-btn:active { border-color: #6366f1; color: #fff; }
+  @media (max-width: 640px) { .toolbar { gap: 6px; } .tool-btn { padding: 8px 9px; } }
+  #diag { display: block; white-space: pre-wrap; word-break: break-word; background: #111; border: 1px solid #333; border-radius: 8px; padding: 10px; margin-bottom: 12px; font: inherit; font-size: 10px; line-height: 1.6; color: #999; max-height: 40vh; overflow-y: auto; }
+  .status-msg { color: #f59e0b; font-size: 11px; margin-top: 4px; }
+  #settings { position: fixed; inset: 0; z-index: 50; background: #0a0a12f2; display: none; align-items: flex-start; justify-content: center; overflow-y: auto; padding: calc(20px + env(safe-area-inset-top, 0px)) 14px 20px; }
+  .sheet { width: 100%; max-width: 440px; background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 18px; }
+  .sheet h2 { font-size: 16px; color: #fff; margin-bottom: 6px; }
+  .sheet p { font-size: 11px; line-height: 1.6; color: #888; margin-bottom: 12px; }
+  .sheet label { display: block; font-size: 11px; color: #aaa; margin: 12px 0 5px; }
+  .sheet input[type=text], .sheet input[type=password], .sheet input[type=number] { width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid #444; background: #111; color: #fff; font: inherit; font-size: 16px; }
+  .sheet input:focus { outline: 2px solid #6366f1; outline-offset: 1px; }
+  .sheet .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .sheet .check { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 12px; color: #ccc; }
+  .sheet .check input { width: 20px; height: 20px; }
+  .sheet .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+  .sheet .actions .tool-btn { min-height: 44px; font-size: 12px; }
+  .tool-btn.primary { background: #6366f1; border-color: #6366f1; color: #fff; flex: 1 1 100%; }
+  .tool-btn.danger { color: #ef4444; border-color: #ef444460; }
+  #set-msg { display: none; color: #f59e0b; font-size: 12px; line-height: 1.5; margin-bottom: 10px; }
+  #toast { display: none; position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 60; background: #222; border: 1px solid #444; color: #fff; font-size: 12px; padding: 10px 16px; border-radius: 8px; }
+  @media (hover: none) { .trade-row:hover { background: transparent !important; } }
+</style>
+</head>
+<body>
+<div id="header-area"></div>
+<div class="toolbar">
+  <button class="tool-btn" onclick="exportCsv()">Export CSV</button>
+  <button class="tool-btn" onclick="openSettings('')">Settings</button>
+  <button class="tool-btn" onclick="if(token)start();else openSettings('')">Restart</button>
+  <button class="tool-btn" onclick="toggleDiag()">Log</button>
+</div>
+<pre id="diag" style="display:none"></pre>
+<div id="settings">
+  <div class="sheet">
+    <h2>Options flow setup</h2>
+    <p>This page connects straight to Tradier from your phone. The token is saved only in this browser on this device and is sent only to Tradier.</p>
+    <div id="set-msg"></div>
+    <label for="set-token">Tradier production token</label>
+    <input id="set-token" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <div class="row3">
+      <div><label for="set-symbol">Symbol</label><input id="set-symbol" type="text" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="8"></div>
+      <div><label for="set-strikes">Strikes</label><input id="set-strikes" type="number" inputmode="numeric" min="2" max="30"></div>
+      <div><label for="set-exps">Expirations</label><input id="set-exps" type="number" inputmode="numeric" min="1" max="10"></div>
+    </div>
+    <label class="check"><input id="set-awake" type="checkbox"> Keep the screen on while this page is open</label>
+    <div class="actions">
+      <button class="tool-btn primary" onclick="saveSettings()">Start streaming</button>
+      <button class="tool-btn" id="set-cancel" onclick="closeSettings()">Cancel</button>
+      <button class="tool-btn" onclick="clearData()">Clear captured data</button>
+      <button class="tool-btn danger" id="set-forget" onclick="forgetToken()">Forget token on this phone</button>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<div class="chart-container" id="chart-area" style="display:none">
+  <div class="chart-header">
+    <div class="chart-head-left" style="display:flex;align-items:center;gap:10px">
+      <span class="title" id="chart-title">QQQ</span>
+      <div class="chart-toggles" id="chart-toggles">
+        <div class="chart-toggle active" onclick="setChartMode('line')">Line</div>
+        <div class="chart-toggle" onclick="setChartMode('1m')">1m</div>
+        <div class="chart-toggle" onclick="setChartMode('5m')">5m</div>
+      </div>
+      <span class="chart-legend">
+        <span><span class="dot" style="background:#10b981"></span> Call Buy</span>
+        <span><span class="dot" style="background:#3b82f6"></span> Put Sell</span>
+        <span><span class="dot" style="background:#ef4444"></span> Put Buy</span>
+        <span><span class="dot" style="background:#f59e0b"></span> Call Sell</span>
+      </span>
+    </div>
+    <span class="price-live" id="chart-price">—</span>
+  </div>
+  <canvas id="priceCanvas" height="180"></canvas>
+  <canvas id="volumeCanvas" height="50"></canvas>
+</div>
+<div id="stats-area"></div>
+<div id="panels-area"></div>
+<div id="footer-area"></div>
+
+<script>
+function fmt(n){if(Math.abs(n)>=1e6)return(n/1e6).toFixed(1)+'M';if(Math.abs(n)>=1e3)return(n/1e3).toFixed(1)+'K';return n?.toLocaleString()||'0'}
+function fmtD(n){if(Math.abs(n)>=1e6)return'$'+(n/1e6).toFixed(1)+'M';if(Math.abs(n)>=1e3)return'$'+(n/1e3).toFixed(1)+'K';return'$'+(n||0).toLocaleString()}
+
+let scrollPos = 0;
+let activeDte = 'all';
+let paused = false;
+let pinnedTrades = [];  // Array of pinned trade objects
+let pinnedIdCounter = 0;
+let pinnedFingerprints = new Set();  // Dedup for auto-pinned trades
+let dismissedFingerprints = new Set(); // Unpinned/cleared trades that auto-pin must not bring back
+let chartMode = 'line'; // 'line', '1m', '5m'
+let chartZoom = 1;       // <1 = zoomed out, 1 = fit all, >1 = zoomed in
+let chartPanOffset = 0;  // ms panned left from the right edge
+let chartDragging = false;
+let chartDragStartX = 0;
+let chartDragStartPan = 0;
+let chartInitialized = false;
+let chartUserInteracted = false; // true = user has zoomed/panned, stops auto-scroll
+let _cachedData = null;  // last data snapshot for instant redraws
+const isTouch = window.matchMedia('(pointer: coarse)').matches;
+let lastTouchTs = 0;      // last finger activity on the panels (ms)
+let panelsRendered = false;
+let lastPanelRender = 0;  // so the scroll-restore after a rebuild isn't mistaken for a finger
+
+// Apply a tap (tab, pin, clear) right away instead of waiting for the next 2s poll.
+function rerenderNow() { lastTouchTs = 0; if (!paused) { if (S) render(snapshot()); else if (_cachedData) render(_cachedData); } }
+const CANVAS_FONT = "ui-monospace, Menlo, 'Roboto Mono', monospace";
+
+// On a phone, rebuilding the panels mid-scroll kills momentum and swallows taps,
+// so hold the rebuild briefly while a finger is on the lists.
+function noteTouch() { lastTouchTs = Date.now(); }
+document.addEventListener('DOMContentLoaded', () => {
+  const pa = document.getElementById('panels-area');
+  if (!pa) return;
+  pa.addEventListener('touchstart', noteTouch, {passive: true});
+  pa.addEventListener('touchmove', noteTouch, {passive: true});
+  pa.addEventListener('touchend', noteTouch, {passive: true});
+  pa.addEventListener('scroll', () => { if (isTouch && Date.now() - lastPanelRender > 150) noteTouch(); }, {passive: true, capture: true});
+});
+
+function setDte(d) { activeDte = d; rerenderNow(); }
+
+function setChartMode(mode) {
+  chartMode = mode;
+  chartZoom = 1; chartPanOffset = 0; chartUserInteracted = false;
+  document.querySelectorAll('.chart-toggle').forEach(el => {
+    el.classList.toggle('active', el.textContent.trim().toLowerCase() === mode);
+  });
+  instantRedraw();
+}
+
+function instantRedraw() {
+  if (_cachedData) drawPriceChart(_cachedData);
+}
+
+function initChartInteraction() {
+  if (chartInitialized) return;
+  const canvas = document.getElementById('priceCanvas');
+  if (!canvas) return;
+  chartInitialized = true;
+
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY < 0 ? 1.2 : 0.833;
+    const oldZoom = chartZoom;
+    chartZoom = Math.max(0.25, Math.min(chartZoom * zoomFactor, 60));
+    chartUserInteracted = (chartZoom !== 1 || chartPanOffset !== 0);
+
+    // Zoom toward cursor position
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = (e.clientX - rect.left) / rect.width;
+    const rightFrac = 1 - mouseX;
+
+    if (window._chartFullRange) {
+      const oldVisRange = window._chartFullRange / oldZoom;
+      const newVisRange = window._chartFullRange / chartZoom;
+      chartPanOffset += (oldVisRange - newVisRange) * rightFrac;
+      chartPanOffset = Math.max(0, chartPanOffset);
+    }
+    instantRedraw();
+  }, {passive: false});
+
+  canvas.addEventListener('mousedown', (e) => {
+    chartDragging = true;
+    chartDragStartX = e.clientX;
+    chartDragStartPan = chartPanOffset;
+    canvas.style.cursor = 'grabbing';
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!chartDragging) return;
+    const canvas = document.getElementById('priceCanvas');
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const dx = e.clientX - chartDragStartX;
+    const pxPerMs = rect.width / (window._chartVisRange || 1);
+    const msDragged = dx / pxPerMs;
+    chartPanOffset = Math.max(0, chartDragStartPan + msDragged);
+    chartUserInteracted = true;
+    instantRedraw();
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (chartDragging) {
+      chartDragging = false;
+      const canvas = document.getElementById('priceCanvas');
+      if (canvas) canvas.style.cursor = 'crosshair';
+    }
+  });
+
+  canvas.addEventListener('dblclick', () => {
+    chartZoom = 1; chartPanOffset = 0; chartUserInteracted = false;
+    instantRedraw();
+  });
+
+  // ─── Touch: one-finger drag = pan, pinch = zoom, double-tap = reset ───
+  let tMode = null, tStartX = 0, tStartPan = 0, tStartDist = 0, tStartZoom = 1, tMoved = false, lastTapTs = 0;
+  const tDist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+
+  canvas.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 1) {
+      tMode = 'pan'; tMoved = false;
+      tStartX = e.touches[0].clientX; tStartPan = chartPanOffset;
+    } else if (e.touches.length === 2) {
+      tMode = 'pinch'; tMoved = true;
+      tStartDist = tDist(e.touches[0], e.touches[1]) || 1;
+      tStartZoom = chartZoom; tStartPan = chartPanOffset;
+    }
+  }, {passive: true});
+
+  canvas.addEventListener('touchmove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    if (tMode === 'pan' && e.touches.length === 1) {
+      const dx = e.touches[0].clientX - tStartX;
+      if (Math.abs(dx) < 6 && !tMoved) return;
+      tMoved = true;
+      const pxPerMs = rect.width / (window._chartVisRange || 1);
+      chartPanOffset = Math.max(0, tStartPan + dx / pxPerMs);
+      chartUserInteracted = true;
+      instantRedraw();
+    } else if (tMode === 'pinch' && e.touches.length === 2) {
+      if (e.cancelable) e.preventDefault();
+      const oldZoom = chartZoom;
+      chartZoom = Math.max(0.25, Math.min(tStartZoom * tDist(e.touches[0], e.touches[1]) / tStartDist, 60));
+      // Keep the point between the fingers fixed, same as wheel-zoom toward the cursor
+      const midX = ((e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left) / rect.width;
+      if (window._chartFullRange) {
+        const oldVis = window._chartFullRange / oldZoom, newVis = window._chartFullRange / chartZoom;
+        chartPanOffset = Math.max(0, chartPanOffset + (oldVis - newVis) * (1 - midX));
+      }
+      chartUserInteracted = (chartZoom !== 1 || chartPanOffset !== 0);
+      instantRedraw();
+    }
+  }, {passive: false});
+
+  canvas.addEventListener('touchend', (e) => {
+    if (e.touches.length === 0) {
+      if (tMode === 'pan' && !tMoved) {
+        const now = Date.now();
+        if (now - lastTapTs < 320) {
+          chartZoom = 1; chartPanOffset = 0; chartUserInteracted = false;
+          instantRedraw();
+          lastTapTs = 0;
+        } else {
+          lastTapTs = now;
+        }
+      }
+      tMode = null;
+    } else if (e.touches.length === 1) {
+      // Pinch ended with one finger still down: continue as a pan from here
+      tMode = 'pan'; tMoved = true;
+      tStartX = e.touches[0].clientX; tStartPan = chartPanOffset;
+    }
+  }, {passive: true});
+  canvas.addEventListener('touchcancel', () => { tMode = null; }, {passive: true});
+
+  canvas.style.cursor = 'crosshair';
+}
+
+function togglePause() {
+  paused = !paused;
+  // Update button immediately
+  const btn = document.getElementById('pause-btn');
+  if (btn) {
+    btn.textContent = paused ? '\u25B6 RESUME' : '\u23F8 PAUSE';
+    btn.className = paused ? 'pause-btn paused' : 'pause-btn';
+  }
+  if (!paused) rerenderNow();
+}
+
+function pinTrade(idx) {
+  if (!window._lastTradesData) return;
+  const trades = window._lastTradesData;
+  if (idx >= 0 && idx < trades.length) {
+    const t = trades[idx];
+    const fp = `${t.time_str}_${t.strike}_${t.type}_${t.direction}_${t.size}_${t.premium}`;
+    if (pinnedFingerprints.has(fp)) return; // Already pinned
+    pinnedFingerprints.add(fp);
+    pinnedTrades.push({...t, _pinId: ++pinnedIdCounter, _fp: fp});
+    rerenderNow();
+  }
+}
+
+function unpinTrade(pinId) {
+  const trade = pinnedTrades.find(t => t._pinId === pinId);
+  if (trade && trade._fp) { pinnedFingerprints.delete(trade._fp); dismissedFingerprints.add(trade._fp); }
+  pinnedTrades = pinnedTrades.filter(t => t._pinId !== pinId);
+  rerenderNow();
+}
+
+function clearAllPinned() {
+  for (const t of pinnedTrades) if (t._fp) dismissedFingerprints.add(t._fp);
+  pinnedTrades = [];
+  pinnedFingerprints.clear();
+  rerenderNow();
+}
+
+function autoPinBigTrades(trades) {
+  for (const t of trades) {
+    if (t.premium < 10000) continue;
+    const fp = `${t.time_str}_${t.strike}_${t.type}_${t.direction}_${t.size}_${t.premium}`;
+    if (pinnedFingerprints.has(fp) || dismissedFingerprints.has(fp)) continue;
+    pinnedFingerprints.add(fp);
+    pinnedTrades.push({...t, _pinId: ++pinnedIdCounter, _fp: fp, _auto: true});
+  }
+}
+
+// ─── Chart Drawing ───
+function drawPriceChart(d) {
+  const ticks = d.price_ticks || [];
+  const markers = d.flow_markers || [];
+  const minVols = d.minute_volumes || [];
+
+  _cachedData = d; // Cache for instant redraws
+
+  if (ticks.length < 2) {
+    document.getElementById('chart-area').style.display = 'none';
+    return;
+  }
+  document.getElementById('chart-area').style.display = 'block';
+  document.getElementById('chart-title').textContent = d.symbol;
+  document.getElementById('chart-price').textContent = '$' + (d.current_price || 0).toFixed(2);
+
+  // Price canvas
+  const canvas = document.getElementById('priceCanvas');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = 180 * dpr;
+  canvas.style.height = '180px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = 180;
+
+  // Init interaction handlers (once)
+  initChartInteraction();
+
+  // Time range with zoom/pan
+  const fullTMin = ticks[0].t, fullTMax = ticks[ticks.length - 1].t;
+  const fullRange = Math.max(fullTMax - fullTMin, 1);
+  window._chartFullRange = fullRange;
+  const visRange = fullRange / chartZoom;
+  window._chartVisRange = visRange;
+
+  // Clamp pan
+  const maxPan = chartZoom >= 1 ? Math.max(fullRange - visRange, 0) : 0;
+  if (chartPanOffset > maxPan) chartPanOffset = maxPan;
+  if (chartPanOffset < 0) chartPanOffset = 0;
+
+  // Auto-scroll: if user hasn't interacted, always show right edge
+  let tMax, tMin;
+  if (!chartUserInteracted) {
+    tMax = fullTMax + (chartZoom < 1 ? (visRange - fullRange) / 2 : 0);
+    tMin = tMax - visRange;
+  } else {
+    tMax = fullTMax - chartPanOffset;
+    tMin = tMax - visRange;
+  }
+  const tRange = Math.max(visRange, 1);
+
+  // Price range - only from visible ticks
+  let pMin = Infinity, pMax = -Infinity;
+  for (const tick of ticks) {
+    if (tick.t >= tMin && tick.t <= tMax) {
+      pMin = Math.min(pMin, tick.p);
+      pMax = Math.max(pMax, tick.p);
+    }
+  }
+  if (pMin === Infinity) { pMin = d.current_price - 1; pMax = d.current_price + 1; }
+  const pPad = Math.max((pMax - pMin) * 0.15, 0.10);
+  pMin -= pPad; pMax += pPad;
+  const pRange = Math.max(pMax - pMin, 0.01);
+
+  function tx(t) { return ((t - tMin) / tRange) * W; }
+  function ty(p) { return H - ((p - pMin) / pRange) * (H - 20) - 10; }
+
+  // Background
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, W, H);
+
+  // Price grid - adaptive nice steps for ~5-7 lines
+  ctx.strokeStyle = '#222';
+  ctx.lineWidth = 0.5;
+  ctx.font = '9px ' + CANVAS_FONT;
+  ctx.fillStyle = '#555';
+  const targetPLines = 6;
+  const rawPS = pRange / targetPLines;
+  const pMag = Math.pow(10, Math.floor(Math.log10(rawPS)));
+  const pN = rawPS / pMag;
+  const pNice = pN <= 1 ? 1 : pN <= 2 ? 2 : pN <= 5 ? 5 : 10;
+  const pStep = pNice * pMag || 0.1;
+  let gridP = Math.ceil(pMin / pStep) * pStep;
+  while (gridP <= pMax) {
+    const y = ty(gridP);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    ctx.fillText('$' + gridP.toFixed(2), 4, y - 3);
+    gridP += pStep;
+  }
+
+  // Time labels - adaptive steps based on visible range
+  const targetTLines = 8;
+  const rawTStep = tRange / targetTLines;
+  // Nice time intervals: 5s, 10s, 15s, 30s, 1m, 2m, 5m, 10m, 15m, 30m, 1h
+  const tNiceSteps = [5000, 10000, 15000, 30000, 60000, 120000, 300000, 600000, 900000, 1800000, 3600000];
+  let tStep = tNiceSteps[tNiceSteps.length - 1];
+  for (const s of tNiceSteps) { if (s >= rawTStep) { tStep = s; break; } }
+  let gridT = Math.ceil(tMin / tStep) * tStep;
+  const showSeconds = tStep < 60000;
+  while (gridT <= tMax) {
+    const x = tx(gridT);
+    ctx.strokeStyle = '#222';
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    const dt = new Date(gridT);
+    const label = showSeconds
+      ? dt.toLocaleTimeString('en-US', {hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})
+      : dt.toLocaleTimeString('en-US', {hour12:false,hour:'2-digit',minute:'2-digit'});
+    ctx.fillStyle = '#555';
+    ctx.fillText(label, x + 3, H - 3);
+    gridT += tStep;
+  }
+
+  // ─── Price Drawing (mode-aware) ───
+  if (chartMode === 'line') {
+    // Line chart with gap detection
+    ctx.beginPath();
+    ctx.strokeStyle = '#818cf8';
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    const step = Math.max(1, Math.floor(ticks.length / (W * 2)));
+    let drawing = false;
+    let prevTick = null;
+    for (let i = 0; i < ticks.length; i += step) {
+      const tick = ticks[i];
+      const x = tx(tick.t), y = ty(tick.p);
+      const timeGap = prevTick ? (tick.t - prevTick.t) > 30000 : false;
+      const priceJump = prevTick ? Math.abs(tick.p - prevTick.p) / prevTick.p > 0.005 : false;
+      if (!drawing || timeGap || priceJump) {
+        ctx.moveTo(x, y);
+        drawing = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+      prevTick = tick;
+    }
+    const last = ticks[ticks.length - 1];
+    ctx.lineTo(tx(last.t), ty(last.p));
+    ctx.stroke();
+
+    // Gradient fill
+    ctx.beginPath();
+    for (let i = 0; i < ticks.length; i += step) {
+      const x = tx(ticks[i].t), y = ty(ticks[i].p);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.lineTo(tx(last.t), ty(last.p));
+    ctx.lineTo(tx(last.t), H);
+    ctx.lineTo(tx(ticks[0].t), H);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#818cf820');
+    grad.addColorStop(1, '#818cf800');
+    ctx.fillStyle = grad;
+    ctx.fill();
+  } else {
+    // Candlestick chart (1m or 5m)
+    const candleMs = chartMode === '5m' ? 300000 : 60000;
+    const candles = {};
+    for (const tick of ticks) {
+      const bucket = Math.floor(tick.t / candleMs) * candleMs;
+      if (!candles[bucket]) {
+        candles[bucket] = { t: bucket, o: tick.p, h: tick.p, l: tick.p, c: tick.p };
+      } else {
+        const c = candles[bucket];
+        c.h = Math.max(c.h, tick.p);
+        c.l = Math.min(c.l, tick.p);
+        c.c = tick.p;
+      }
+    }
+    const candleArr = Object.values(candles).sort((a, b) => a.t - b.t);
+    if (candleArr.length > 0) {
+      // Candle width based on interval
+      const rawW = (candleMs / tRange) * W;
+      const cW = Math.max(Math.min(rawW * 0.7, 20), 3);
+
+      for (const c of candleArr) {
+        const x = tx(c.t + candleMs / 2); // center of candle
+        const bullish = c.c >= c.o;
+        const bodyColor = bullish ? '#10b981' : '#ef4444';
+        const wickColor = bullish ? '#10b98199' : '#ef444499';
+
+        // Wick (high to low)
+        ctx.strokeStyle = wickColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, ty(c.h));
+        ctx.lineTo(x, ty(c.l));
+        ctx.stroke();
+
+        // Body (open to close)
+        const bodyTop = ty(Math.max(c.o, c.c));
+        const bodyBot = ty(Math.min(c.o, c.c));
+        const bodyH = Math.max(bodyBot - bodyTop, 1); // at least 1px
+
+        if (bullish) {
+          // Hollow/filled green
+          ctx.fillStyle = bodyColor + '40';
+          ctx.fillRect(x - cW/2, bodyTop, cW, bodyH);
+          ctx.strokeStyle = bodyColor;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x - cW/2, bodyTop, cW, bodyH);
+        } else {
+          // Solid red
+          ctx.fillStyle = bodyColor + 'cc';
+          ctx.fillRect(x - cW/2, bodyTop, cW, bodyH);
+        }
+      }
+    }
+  }
+
+  // Current price line
+  const curY = ty(d.current_price);
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = '#818cf880';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, curY); ctx.lineTo(W, curY); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Flow markers
+  for (const m of markers) {
+    if (m.t < tMin || m.t > tMax) continue;
+    const x = tx(m.t);
+    // Find nearest price tick
+    let nearP = d.current_price;
+    for (let i = ticks.length - 1; i >= 0; i--) {
+      if (ticks[i].t <= m.t) { nearP = ticks[i].p; break; }
+    }
+    const y = ty(nearP);
+    const radius = Math.min(Math.max(m.premium / 20000 * 4, 3), 10);
+
+    let color;
+    if (m.direction === 'BUY' && m.type === 'call') {
+      color = '#10b981';   // Call buy = bullish (green)
+    } else if (m.direction === 'SELL' && m.type === 'put') {
+      color = '#3b82f6';   // Put sell = bullish (blue)
+    } else if (m.direction === 'BUY' && m.type === 'put') {
+      color = '#ef4444';   // Put buy = bearish (red)
+    } else {
+      color = '#f59e0b';   // Call sell = bearish (orange)
+    }
+
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = color + '90';
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // Zoom/pan indicator
+  if (chartUserInteracted) {
+    ctx.font = '10px ' + CANVAS_FONT;
+    ctx.fillStyle = '#818cf8';
+    const zoomTxt = chartZoom !== 1 ? `${chartZoom.toFixed(1)}x` : '1x';
+    const hint = isTouch ? 'pinch=zoom, drag=pan, double-tap=reset' : 'scroll=zoom, drag=pan, dblclick=reset';
+    ctx.textAlign = 'right';
+    ctx.fillText(W < 420 ? `${zoomTxt} \u2014 ${isTouch ? 'double-tap to reset' : 'dblclick=reset'}` : `${zoomTxt} \u2014 ${hint}`, W - 6, 14);
+    ctx.textAlign = 'left';
+  }
+
+  // ─── Volume Bars ───
+  const vCanvas = document.getElementById('volumeCanvas');
+  vCanvas.width = rect.width * dpr;
+  vCanvas.height = 50 * dpr;
+  vCanvas.style.height = '50px';
+  const vCtx = vCanvas.getContext('2d');
+  vCtx.scale(dpr, dpr);
+  const VH = 50;
+
+  vCtx.fillStyle = '#111';
+  vCtx.fillRect(0, 0, W, VH);
+
+  if (minVols.length > 0) {
+    // Filter to visible range and calculate max
+    const visMins = minVols.filter(mv => mv.t >= tMin && mv.t <= tMax);
+    let maxVol = 1;
+    for (const mv of visMins) maxVol = Math.max(maxVol, mv.buy + mv.sell);
+
+    const barW = Math.max((60000 / tRange) * W * 0.7, 2); // Width based on 1min in visible range
+
+    for (const mv of visMins) {
+      const x = tx(mv.t);
+      if (x < -barW || x > W + barW) continue;
+      const totalH = ((mv.buy + mv.sell) / maxVol) * (VH - 6);
+      const buyH = mv.buy + mv.sell > 0 ? (mv.buy / (mv.buy + mv.sell)) * totalH : 0;
+      const sellH = totalH - buyH;
+
+      vCtx.fillStyle = '#10b98180';
+      vCtx.fillRect(x - barW/2, VH - buyH, barW, buyH);
+      vCtx.fillStyle = '#ef444480';
+      vCtx.fillRect(x - barW/2, VH - totalH, barW, sellH);
+    }
+
+    // Label
+    vCtx.font = '8px ' + CANVAS_FONT;
+    vCtx.fillStyle = '#555';
+    vCtx.fillText('Vol/min: green=buy, red=sell', 4, 9);
+  }
+}
+
+// ─── Main Render ───
+function render(d) {
+  // Always draw chart even when paused
+  drawPriceChart(d);
+
+  // When paused, only update chart and header status
+  if (paused) {
+    const hdr = document.getElementById('header-area');
+    if (hdr) {
+      const sc = d.status==='streaming'?'status-streaming':d.status==='error'?'status-error':'status-connecting';
+      // Just update the subtitle trade count
+      const sub = hdr.querySelector('.sub');
+      if (sub) sub.innerHTML = `<span class="status-dot ${sc}"></span>${d.status?.toUpperCase()} \u2014 ${d.trade_count?.toLocaleString()||0} trades \u2014 <span style="color:#ef4444;font-weight:600">PAUSED</span>`;
+    }
+    return;
+  }
+
+  const el = document.getElementById('trades-scroll');
+  if (el) scrollPos = el.scrollTop;
+  const pl = document.getElementById('pinned-list');
+  const pinScrollPos = pl ? pl.scrollTop : 0;
+
+  const q = d.quote || {};
+  const up = q.change >= 0;
+  const sc = d.status==='streaming'?'status-streaming':d.status==='error'?'status-error':'status-connecting';
+
+  let cb, cs, pb, ps;
+  if (activeDte === 'all') {
+    cb = d.total_call_buy||0; cs = d.total_call_sell||0;
+    pb = d.total_put_buy||0; ps = d.total_put_sell||0;
+  } else {
+    const dt = (d.dte_totals||{})[activeDte] || {};
+    cb = dt.call_buy||0; cs = dt.call_sell||0;
+    pb = dt.put_buy||0; ps = dt.put_sell||0;
+  }
+  const tb = cb+pb, ts2 = cs+ps;
+  const bp = tb+ts2>0 ? ((tb/(tb+ts2))*100).toFixed(0) : 50;
+
+  const exps = q.expirations || [];
+  const expStr = exps.map(e => `${e.dte}DTE`).join(', ');
+
+  // Header
+  document.getElementById('header-area').innerHTML = `
+    <div class="header">
+      <div>
+        <h1>LIVE FLOW<span class="accent"> STREAM</span></h1>
+        <div class="sub"><span class="status-dot ${sc}"></span>${d.status?.toUpperCase()} \u2014 ${d.trade_count?.toLocaleString()||0} trades \u2014 ${expStr||'loading'}</div>${d.status_msg?`<div class="status-msg">${esc(d.status_msg)}</div>`:''}
+      </div>
+      <div style="text-align:right;font-size:11px;color:#666">
+        <div>${activeDte==='all'?'All DTEs':'DTE '+activeDte} Buy/Sell</div>
+        <div style="font-size:22px;font-weight:700;color:${parseInt(bp)>=50?'#10b981':'#ef4444'}">${bp}% <span style="font-size:12px;color:#888">buy</span></div>
+      </div>
+    </div>`;
+
+  // Stats
+  document.getElementById('stats-area').innerHTML = `
+    <div class="stats-grid">
+      <div class="stat-card"><div class="label">Call Buys</div><div class="value" style="color:#10b981">${fmt(cb)}</div></div>
+      <div class="stat-card"><div class="label">Call Sells</div><div class="value" style="color:#ef4444">${fmt(cs)}</div></div>
+      <div class="stat-card"><div class="label">Call Net</div><div class="value" style="color:${cb-cs>=0?'#10b981':'#ef4444'}">${cb-cs>=0?'+':''}${fmt(cb-cs)}</div></div>
+      <div class="stat-card"><div class="label">Put Buys</div><div class="value" style="color:#10b981">${fmt(pb)}</div></div>
+      <div class="stat-card"><div class="label">Put Sells</div><div class="value" style="color:#ef4444">${fmt(ps)}</div></div>
+      <div class="stat-card"><div class="label">Put Net</div><div class="value" style="color:${pb-ps>=0?'#10b981':'#ef4444'}">${pb-ps>=0?'+':''}${fmt(pb-ps)}</div></div>
+    </div>`;
+
+  // Draw chart (using canvas, doesn't need innerHTML)
+  drawPriceChart(d);
+
+  // ─── Panels ───
+  if (panelsRendered && isTouch && Date.now() - lastTouchTs < 1200) return;
+  panelsRendered = true;
+  const activeDtes = d.active_dtes || [];
+  const dteTotals = d.dte_totals || {};
+
+  let ph = `<div class="panels"><div class="panel">
+    <h2><span style="color:#6366f1">\u25C6</span> FLOW BY STRIKE
+      <span style="font-size:9px;color:#555;font-weight:400;margin-left:auto">
+        <span style="color:#10b981">\u25A0</span> BUY%
+        <span style="color:#ef4444;margin-left:4px">\u25A0</span> SELL%
+      </span>
+    </h2>
+    <div class="dte-tabs">
+      <div class="dte-tab ${activeDte==='all'?'active':''}" onclick="setDte('all')">ALL</div>`;
+
+  for (const dte of activeDtes) {
+    const dt = dteTotals[String(dte)] || {};
+    const vol = (dt.call_buy||0)+(dt.call_sell||0)+(dt.put_buy||0)+(dt.put_sell||0);
+    ph += `<div class="dte-tab ${activeDte===String(dte)?'active':''}" onclick="setDte('${dte}')">${dte}DTE<span class="vol-hint">${vol>0?fmt(vol):''}</span></div>`;
+  }
+
+  ph += `</div>
+    <div class="strike-header">
+      <div style="text-align:center">Calls</div>
+      <div style="text-align:center">Call Buy/Sell</div>
+      <div style="text-align:center">Strike</div>
+      <div style="text-align:center">Put Buy/Sell</div>
+      <div style="text-align:center">Puts</div>
+      <div style="text-align:center">Net $</div>
+    </div>`;
+
+  let strikes = d.strikes || [];
+  if (activeDte !== 'all') {
+    strikes = strikes.filter(s => String(s.dte) === activeDte);
+  } else {
+    const merged = {};
+    for (const s of strikes) {
+      const k = s.strike;
+      if (!merged[k]) merged[k] = {strike:k, call_buy_vol:0,call_sell_vol:0,call_neutral_vol:0,put_buy_vol:0,put_sell_vol:0,put_neutral_vol:0,call_buy_prem:0,call_sell_prem:0,put_buy_prem:0,put_sell_prem:0};
+      const m = merged[k];
+      m.call_buy_vol+=s.call_buy_vol||0; m.call_sell_vol+=s.call_sell_vol||0; m.call_neutral_vol+=s.call_neutral_vol||0;
+      m.put_buy_vol+=s.put_buy_vol||0; m.put_sell_vol+=s.put_sell_vol||0; m.put_neutral_vol+=s.put_neutral_vol||0;
+      m.call_buy_prem+=s.call_buy_prem||0; m.call_sell_prem+=s.call_sell_prem||0;
+      m.put_buy_prem+=s.put_buy_prem||0; m.put_sell_prem+=s.put_sell_prem||0;
+    }
+    strikes = Object.values(merged).sort((a,b)=>a.strike-b.strike);
+    for (const s of strikes) {
+      s.call_total=s.call_buy_vol+s.call_sell_vol+s.call_neutral_vol;
+      s.put_total=s.put_buy_vol+s.put_sell_vol+s.put_neutral_vol;
+      s.call_buy_pct=s.call_total>0?Math.round(s.call_buy_vol/s.call_total*100):50;
+      s.put_buy_pct=s.put_total>0?Math.round(s.put_buy_vol/s.put_total*100):50;
+      s.net_premium=(s.call_buy_prem+s.put_buy_prem)-(s.call_sell_prem+s.put_sell_prem);
+    }
+  }
+
+  if (!strikes.length) {
+    ph += `<div style="padding:24px;text-align:center;color:#555">No trades for this DTE yet...</div>`;
+  } else {
+    for (const s of strikes) {
+      const cbp=s.call_buy_pct||50, pbp=s.put_buy_pct||50;
+      const cc=cbp>=60?'#10b981':cbp<=40?'#ef4444':'#f59e0b';
+      const pc=pbp>=60?'#10b981':pbp<=40?'#ef4444':'#f59e0b';
+      const nc=s.net_premium>0?'#10b981':s.net_premium<0?'#ef4444':'#888';
+      ph += `<div class="strike-row">
+        <div style="text-align:center;font-size:9px"><span style="color:#10b981">${fmt(s.call_buy_vol)}</span><span style="color:#555">/</span><span style="color:#ef4444">${fmt(s.call_sell_vol)}</span></div>
+        <div><div class="pct-bar-outer"><div class="pct-bar-fill" style="width:${cbp}%;background:${cc}"></div><div class="pct-bar-label">${(s.call_total||0)>0?cbp+'% buy':'\u2014'}</div></div></div>
+        <div style="text-align:center;color:#fff;font-weight:700;font-size:12px">$${s.strike}</div>
+        <div><div class="pct-bar-outer"><div class="pct-bar-fill" style="width:${pbp}%;background:${pc}"></div><div class="pct-bar-label">${(s.put_total||0)>0?pbp+'% buy':'\u2014'}</div></div></div>
+        <div style="text-align:center;font-size:9px"><span style="color:#10b981">${fmt(s.put_buy_vol)}</span><span style="color:#555">/</span><span style="color:#ef4444">${fmt(s.put_sell_vol)}</span></div>
+        <div style="text-align:center;color:${nc};font-weight:600;font-size:9px">${s.net_premium>0?'+':''}${fmtD(Math.round(s.net_premium))}</div>
+      </div>`;
+    }
+  }
+  ph += `</div>`;
+
+  // Trades
+  let trades = d.recent_trades || [];
+  if (activeDte !== 'all') trades = trades.filter(t => String(t.dte) === activeDte);
+  // Store for pin lookups
+  window._lastTradesData = trades;
+
+  // Auto-pin $10K+ trades
+  autoPinBigTrades(trades);
+
+  ph += `<div class="panel">
+    <h2>
+      <span style="width:8px;height:8px;background:#10b981;border-radius:50%;animation:pulse 2s infinite;display:inline-block"></span> RECENT TRADES
+      <span style="font-size:9px;color:#555;font-weight:400;margin-left:auto">${trades.length} shown</span>
+      <button id="pause-btn" class="pause-btn ${paused?'paused':''}" onclick="togglePause()">${paused?'\u25B6 RESUME':'\u23F8 PAUSE'}</button>
+    </h2>`;
+
+  // Pinned trades section
+  if (pinnedTrades.length > 0) {
+    ph += `<div class="pinned-section">
+      <div class="pinned-header">
+        <span>\u{1F4CC} PINNED (${pinnedTrades.length})</span>
+        <span class="clear-pins" style="cursor:pointer;color:#888;font-size:9px;margin-left:auto;padding:2px 6px;border:1px solid #333;border-radius:4px" onclick="clearAllPinned()">CLEAR ALL</span>
+      </div><div class="pinned-list" id="pinned-list">`;
+    // Reverse order: newest pinned trades at top
+    for (let pi = pinnedTrades.length - 1; pi >= 0; pi--) {
+      const t = pinnedTrades[pi];
+      const sc2=t.direction==='BUY'?'badge-buy':t.direction==='SELL'?'badge-sell':'badge-neutral';
+      const tc=t.type==='call'?'badge-call':'badge-put';
+      const big=t.premium>=10000;
+      const autoTag = t._auto ? '<span class="auto-tag" style="font-size:7px;color:#f59e0b;margin-left:2px">AUTO</span>' : '';
+      ph += `<div class="pinned-row">
+        <div style="color:#888">${t.time_str||''}${autoTag}</div>
+        <div><span class="badge ${tc}">${t.type}</span></div>
+        <div style="color:#fff">$${t.strike}</div>
+        <div><span class="badge ${sc2}">${t.direction}</span></div>
+        <div style="color:#fff;font-weight:${big?'700':'400'}">${t.size}</div>
+        <div style="color:#888">$${t.price?.toFixed(2)}</div>
+        <div style="color:${big?'#f59e0b':'#888'};font-weight:${big?'600':'400'}">${fmtD(t.premium)}</div>
+        <div><span class="badge badge-dte">${t.dte}d</span></div>
+        <div class="pin-x" onclick="unpinTrade(${t._pinId})">\u2715</div>
+      </div>`;
+    }
+    ph += `</div></div>`;
+  }
+
+  ph += `<div class="trades-scroll" id="trades-scroll">
+      <div class="trade-header"><div>Time</div><div>Type</div><div>Strike</div><div>Side</div><div>Size</div><div>Price</div><div>Premium</div><div>DTE</div></div>`;
+
+  if (!trades.length) {
+    ph += `<div style="padding:24px;text-align:center;color:#555">Waiting for trades...</div>`;
+  } else {
+    for (let i = 0; i < trades.length; i++) {
+      const t = trades[i];
+      const sc2=t.direction==='BUY'?'badge-buy':t.direction==='SELL'?'badge-sell':'badge-neutral';
+      const tc=t.type==='call'?'badge-call':'badge-put';
+      const big=t.premium>=10000;
+      ph += `<div class="trade-row" style="${big?'background:#f59e0b10':''}" onclick="pinTrade(${i})" title="Click to pin">
+        <div style="color:#888">${t.time_str||''}</div>
+        <div><span class="badge ${tc}">${t.type}</span></div>
+        <div style="color:#fff">$${t.strike}</div>
+        <div><span class="badge ${sc2}">${t.direction}</span></div>
+        <div style="color:#fff;font-weight:${big?'700':'400'}">${t.size}</div>
+        <div style="color:#888">$${t.price?.toFixed(2)}</div>
+        <div style="color:${big?'#f59e0b':'#888'};font-weight:${big?'600':'400'}">${fmtD(t.premium)}</div>
+        <div><span class="badge badge-dte">${t.dte}d</span></div>
+      </div>`;
+    }
+  }
+  ph += `</div></div></div>`;
+
+  document.getElementById('panels-area').innerHTML = ph;
+  lastPanelRender = Date.now();
+
+  document.getElementById('footer-area').innerHTML = `<div class="footer"><strong>Chart:</strong> Purple = ${d.symbol} price. Dots = options trades >$5K: <span style="color:#10b981">green</span>=call buy, <span style="color:#3b82f6">blue</span>=put sell (both bullish) | <span style="color:#ef4444">red</span>=put buy, <span style="color:#f59e0b">orange</span>=call sell (both bearish). Dot size = premium. <strong>Trades:</strong> ${isTouch?'Tap':'Click'} to \u{1F4CC} pin. \u23F8 Pause freezes display (data keeps collecting). Export CSV saves what this page has captured.</div>`;
+
+  const nel = document.getElementById('trades-scroll');
+  if (nel) nel.scrollTop = scrollPos;
+  const npl = document.getElementById('pinned-list');
+  if (npl) npl.scrollTop = pinScrollPos;
+}
+
+// ─── Engine: everything the Python backend used to do, now in the page ───
+const API = 'https://api.tradier.com/v1';
+const WS_URL = 'wss://ws.tradier.com/v1/markets/events';
+const LS = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+};
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+const pad2 = n => String(n).padStart(2, '0');
+
+let token = LS.get('flow_token') || '';
+let cfg = { symbol: 'QQQ', strikes: 10, expirations: 6, keepAwake: true };
+try { Object.assign(cfg, JSON.parse(LS.get('flow_cfg') || '{}')); } catch (e) {}
+
+let S = null;             // live state
+let allTrades = [];       // everything captured since this page loaded (for CSV export)
+let allSymbols = [];
+let ws = null, connecting = false, retryTimer = null, retryDelay = 3000;
+let lastMsg = 0, silentReconnects = 0, stopped = true, wakeLock = null;
+const diagLines = [];
+
+function log(msg) {
+  const d = new Date();
+  diagLines.push(`${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}  ${msg}`);
+  if (diagLines.length > 60) diagLines.shift();
+  const el = document.getElementById('diag');
+  if (el && el.style.display !== 'none') el.textContent = diagLines.join('\n');
+}
+function setStatus(status, msg) {
+  if (S) { S.status = status; S.statusMsg = msg || ''; }
+  if (msg) log(msg);
+  if (S && !paused) { lastTouchTs = 0; render(snapshot()); }
+}
+
+function todayStr() { const n = new Date(); return `${n.getFullYear()}-${pad2(n.getMonth() + 1)}-${pad2(n.getDate())}`; }
+function computeDte(exp) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(exp || '');
+  if (!m) return -1;
+  const n = new Date();
+  return Math.round((new Date(+m[1], +m[2] - 1, +m[3]) - new Date(n.getFullYear(), n.getMonth(), n.getDate())) / 86400000);
+}
+function marketOpenNow() {
+  try {
+    const p = {};
+    for (const x of new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date())) p[x.type] = x.value;
+    const mins = (parseInt(p.hour, 10) % 24) * 60 + parseInt(p.minute, 10);
+    return p.weekday !== 'Sat' && p.weekday !== 'Sun' && mins >= 570 && mins <= 975;
+  } catch (e) { return true; }
+}
+
+// ─── Tradier REST ───
+async function api(path, params, method) {
+  const url = new URL(API + path);
+  if (params) for (const k in params) url.searchParams.set(k, params[k]);
+  let r;
+  try {
+    r = await fetch(url, { method: method || 'GET', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' }, cache: 'no-store' });
+  } catch (e) {
+    const err = new Error('Could not reach Tradier (no connection, or the request was blocked)'); err.network = true; throw err;
+  }
+  if (!r.ok) { const err = new Error('Tradier answered HTTP ' + r.status + ' for ' + path); err.status = r.status; throw err; }
+  return r.json();
+}
+async function getQuote(symbol) {
+  const j = await api('/markets/quotes', { symbols: symbol });
+  const q = ((j || {}).quotes || {}).quote || {};
+  return Array.isArray(q) ? (q[0] || {}) : q;
+}
+async function getExpirations(symbol) {
+  const j = await api('/markets/options/expirations', { symbol });
+  const d = ((j || {}).expirations || {}).date || [];
+  return typeof d === 'string' ? [d] : d;
+}
+async function getChain(symbol, expiration) {
+  const j = await api('/markets/options/chains', { symbol, expiration, greeks: 'false' });
+  const o = ((j || {}).options || {}).option || [];
+  return Array.isArray(o) ? o : [o];
+}
+
+// ─── Lee-Ready classification (same rule as the Python version) ───
+function classifyTrade(price, bid, ask, lastRef) {
+  if (bid === 0 && ask === 0) return 'NEUTRAL';
+  const mid = (bid + ask) / 2;
+  if (price > mid) return 'BUY';
+  if (price < mid) return 'SELL';
+  if (lastRef && price > lastRef) return 'BUY';
+  if (lastRef && price < lastRef) return 'SELL';
+  return 'NEUTRAL';
+}
+
+// ─── State ───
+function newState(symbol) {
+  return { symbol, day: todayStr(), quote: {}, symbolInfo: {}, trades: [], strikeAgg: {}, dteTotals: {},
+    tcb: 0, tcs: 0, tpb: 0, tps: 0, tradeCount: 0, status: 'connecting', statusMsg: '', lastPrices: {},
+    priceTicks: [], currentPrice: 0, markers: [], minVols: {} };
+}
+function addPriceTick(price, ts) {
+  price = parseFloat(price); ts = parseInt(ts, 10);
+  if (!isFinite(price) || !isFinite(ts)) return;
+  S.currentPrice = price;
+  S.priceTicks.push({ t: ts, p: price });
+  if (S.priceTicks.length > 5000) {
+    const half = S.priceTicks.length >> 1;
+    S.priceTicks = S.priceTicks.slice(0, half).filter((_, i) => i % 2 === 0).concat(S.priceTicks.slice(half));
+  }
+}
+function addTrade(occ, price, bid, ask, size, timestamp) {
+  const info = S.symbolInfo[occ]; if (!info) return;
+  price = parseFloat(price) || 0; bid = parseFloat(bid) || 0; ask = parseFloat(ask) || 0; size = parseInt(size, 10) || 0;
+  const direction = classifyTrade(price, bid, ask, S.lastPrices[occ]);
+  S.lastPrices[occ] = price;
+  const premium = Math.round(price * size * 100 * 100) / 100;
+  let ts = parseInt(timestamp, 10), timeStr = '';
+  if (isFinite(ts) && ts > 0) { const d = new Date(ts); timeStr = `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; } else ts = 0;
+  const t = { time: String(timestamp), time_str: timeStr, occ, strike: info.strike, type: info.type, direction, price, size, bid, ask, premium, expiration: info.expiration, dte: info.dte };
+  S.trades.push(t); if (S.trades.length > 2000) S.trades = S.trades.slice(-2000);
+  allTrades.push(t); if (allTrades.length > 300000) allTrades.shift();
+  S.tradeCount++;
+
+  if (premium >= 5000) {
+    S.markers.push({ t: ts, premium, direction, type: info.type });
+    if (S.markers.length > 500) S.markers = S.markers.slice(-500);
+  }
+  if (ts > 0) {
+    const mk = String(Math.floor(ts / 60000) * 60000);
+    const mv = S.minVols[mk] || (S.minVols[mk] = { buy: 0, sell: 0 });
+    if (direction === 'BUY') mv.buy += size; else if (direction === 'SELL') mv.sell += size;
+  }
+  const key = info.strike + '|' + info.dte;
+  const agg = S.strikeAgg[key] || (S.strikeAgg[key] = { strike: info.strike, dte: info.dte, expiration: info.expiration,
+    call_buy_vol: 0, call_sell_vol: 0, call_neutral_vol: 0, put_buy_vol: 0, put_sell_vol: 0, put_neutral_vol: 0,
+    call_buy_prem: 0, call_sell_prem: 0, put_buy_prem: 0, put_sell_prem: 0 });
+  const vk = `${info.type}_${direction.toLowerCase()}_vol`, pk = `${info.type}_${direction.toLowerCase()}_prem`;
+  if (vk in agg) agg[vk] += size;
+  if (pk in agg) agg[pk] += premium;
+  const dt = S.dteTotals[info.dte] || (S.dteTotals[info.dte] = { call_buy: 0, call_sell: 0, put_buy: 0, put_sell: 0 });
+  if (direction === 'BUY') { if (info.type === 'call') { S.tcb += size; dt.call_buy += size; } else { S.tpb += size; dt.put_buy += size; } }
+  else if (direction === 'SELL') { if (info.type === 'call') { S.tcs += size; dt.call_sell += size; } else { S.tps += size; dt.put_sell += size; } }
+}
+function snapshot() {
+  const strikes = Object.values(S.strikeAgg).map(a => {
+    const s = Object.assign({}, a);
+    s.call_total = s.call_buy_vol + s.call_sell_vol + s.call_neutral_vol;
+    s.put_total = s.put_buy_vol + s.put_sell_vol + s.put_neutral_vol;
+    s.call_buy_pct = s.call_total > 0 ? Math.round(s.call_buy_vol / s.call_total * 100) : 50;
+    s.put_buy_pct = s.put_total > 0 ? Math.round(s.put_buy_vol / s.put_total * 100) : 50;
+    s.net_premium = (s.call_buy_prem + s.put_buy_prem) - (s.call_sell_prem + s.put_sell_prem);
+    return s;
+  }).sort((a, b) => a.strike - b.strike);
+  const mins = Object.keys(S.minVols).sort((a, b) => a - b).slice(-60).map(k => ({ t: +k, buy: S.minVols[k].buy, sell: S.minVols[k].sell }));
+  return { symbol: S.symbol, quote: S.quote, status: S.status, status_msg: S.statusMsg, trade_count: S.tradeCount,
+    total_call_buy: S.tcb, total_call_sell: S.tcs, total_put_buy: S.tpb, total_put_sell: S.tps,
+    current_price: S.currentPrice, strikes, dte_totals: S.dteTotals,
+    active_dtes: Object.keys(S.dteTotals).map(Number).sort((a, b) => a - b),
+    recent_trades: S.trades.slice(-200).reverse(), price_ticks: S.priceTicks.slice(-2000),
+    flow_markers: S.markers, minute_volumes: mins };
+}
+
+// ─── Keep today's data across reloads (iOS reloads pages it has put to sleep) ───
+function persist() {
+  if (!S || !S.tradeCount && !S.priceTicks.length) return;
+  const pack = (nT, nP) => JSON.stringify({ v: 1, day: S.day, symbol: S.symbol, trades: S.trades.slice(-nT), strikeAgg: S.strikeAgg,
+    dteTotals: S.dteTotals, tot: [S.tcb, S.tcs, S.tpb, S.tps], tradeCount: S.tradeCount, lastPrices: S.lastPrices,
+    priceTicks: S.priceTicks.slice(-nP), markers: S.markers, minVols: S.minVols, currentPrice: S.currentPrice });
+  if (!LS.set('flow_state', pack(2000, 5000))) LS.set('flow_state', pack(300, 1500));
+}
+function restore() {
+  let p; try { p = JSON.parse(LS.get('flow_state') || 'null'); } catch (e) { p = null; }
+  if (!p || p.v !== 1 || p.day !== S.day || p.symbol !== S.symbol) return false;
+  S.trades = p.trades || []; S.strikeAgg = p.strikeAgg || {}; S.dteTotals = p.dteTotals || {};
+  [S.tcb, S.tcs, S.tpb, S.tps] = p.tot || [0, 0, 0, 0];
+  S.tradeCount = p.tradeCount || 0; S.lastPrices = p.lastPrices || {}; S.priceTicks = p.priceTicks || [];
+  S.markers = p.markers || []; S.minVols = p.minVols || {}; if (p.currentPrice) S.currentPrice = p.currentPrice;
+  if (!allTrades.length) allTrades = S.trades.slice();
+  return true;
+}
+
+// ─── Start-up: pick near-the-money contracts, then stream ───
+async function start() {
+  stopStream(); stopped = false;
+  const symbol = cfg.symbol;
+  S = newState(symbol); allTrades = []; allSymbols = [];
+  setStatus('connecting', `Loading ${symbol} option chains`);
+  try {
+    const exps = (await getExpirations(symbol)).slice(0, cfg.expirations);
+    if (!exps.length) throw new Error(`Tradier returned no option expirations for ${symbol}`);
+    const q = await getQuote(symbol);
+    const price = q.last != null ? q.last : (q.close != null ? q.close : 0);
+    const optionSymbols = [], expList = [];
+    for (const exp of exps) {
+      const dte = computeDte(exp), chain = await getChain(symbol, exp);
+      if (!chain.length) continue;
+      const strikes = [...new Set(chain.map(o => o.strike || 0))];
+      const ntm = new Set(strikes.sort((a, b) => Math.abs(a - price) - Math.abs(b - price)).slice(0, cfg.strikes));
+      let count = 0;
+      for (const o of chain) {
+        if (!ntm.has(o.strike || 0) || !o.symbol) continue;
+        optionSymbols.push(o.symbol);
+        S.symbolInfo[o.symbol] = { strike: o.strike || 0, type: String(o.option_type || '').toLowerCase(), expiration: exp, dte };
+        count++;
+      }
+      expList.push({ date: exp, dte, contracts: count });
+    }
+    if (!optionSymbols.length) throw new Error('No option contracts found');
+    S.quote = { price, change: q.change || 0, change_pct: q.change_percentage || 0, expirations: expList };
+    S.currentPrice = price;
+    allSymbols = [symbol].concat(optionSymbols);
+    log(`Tracking ${optionSymbols.length} contracts across ${expList.length} expirations, ${symbol} at $${price}`);
+    if (restore()) log(`Restored ${S.tradeCount} trades captured earlier today`);
+  } catch (e) { return startFailed(e); }
+  connect();
+}
+function startFailed(e) {
+  stopped = true;
+  if (e.status === 401) { setStatus('error', 'Tradier rejected the token'); openSettings('Tradier rejected that token. Paste the production token (not the sandbox one) and try again.'); return; }
+  setStatus('error', e.message + '. Tap Restart to try again.');
+}
+
+async function connect() {
+  if (connecting || stopped) return;
+  connecting = true; clearTimeout(retryTimer);
+  try {
+    const j = await api('/markets/events/session', null, 'POST');
+    const sid = ((j || {}).stream || {}).sessionid;
+    if (!sid) throw new Error('Tradier did not return a streaming session');
+    if (stopped) return;
+    const sock = new WebSocket(WS_URL); ws = sock;
+    sock.onopen = () => {
+      sock.send(JSON.stringify({ symbols: allSymbols, sessionid: sid, filter: ['timesale'], linebreak: true }));
+      lastMsg = Date.now(); retryDelay = 3000;
+      setStatus('streaming', 'Stream connected');
+    };
+    sock.onmessage = ev => {
+      if (ws !== sock || typeof ev.data !== 'string') return;
+      lastMsg = Date.now(); silentReconnects = 0;
+      if (S.statusMsg) S.statusMsg = '';
+      for (const line of ev.data.split('\n')) {
+        if (!line.trim()) continue;
+        let d; try { d = JSON.parse(line); } catch (e) { continue; }
+        if (d.error) { log('Tradier stream error: ' + d.error); S.statusMsg = 'Tradier: ' + d.error; continue; }
+        if (d.type !== 'timesale') continue;
+        if (d.symbol === S.symbol) addPriceTick(d.last, d.date);
+        else addTrade(d.symbol, d.last, d.bid, d.ask, d.size, d.date);
+      }
+    };
+    sock.onclose = ev => {
+      if (ws !== sock) return;
+      ws = null;
+      if (stopped) return;
+      setStatus('reconnecting', `Stream closed (code ${ev.code}), reconnecting`);
+      scheduleReconnect();
+    };
+  } catch (e) {
+    if (e.status === 401) { stopped = true; setStatus('error', 'Tradier rejected the token'); openSettings('Tradier rejected that token. Paste the production token (not the sandbox one) and try again.'); }
+    else { setStatus('error', e.message + ', retrying'); scheduleReconnect(); }
+  } finally { connecting = false; }
+}
+function scheduleReconnect() {
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(connect, retryDelay);
+  retryDelay = Math.min(retryDelay * 2, 30000);
+}
+function closeSocket() { const s = ws; ws = null; if (s) { try { s.close(); } catch (e) {} } }
+function stopStream() { stopped = true; clearTimeout(retryTimer); closeSocket(); }
+function forceReconnect(why) { if (stopped || !allSymbols.length) return; log(why); closeSocket(); S.status = 'reconnecting'; retryDelay = 3000; connect(); }
+
+// A stream can die quietly when iOS suspends the page; these bring it back.
+setInterval(() => {
+  if (!S || stopped || document.visibilityState !== 'visible') return;
+  const quiet = Date.now() - lastMsg;
+  if (ws && ws.readyState === 1 && quiet > 45000) {
+    if (marketOpenNow() && silentReconnects < 3) { silentReconnects++; forceReconnect('No data for 45s during market hours, reconnecting'); }
+    else if (!S.statusMsg) S.statusMsg = marketOpenNow() ? 'Connected, but no trades are arriving.' : 'Connected. No trades arriving, the market looks closed.';
+  }
+}, 10000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { persist(); return; }
+  acquireWake();
+  if (!S || stopped) return;
+  if (!ws || ws.readyState > 1) forceReconnect('Back in view, reconnecting');
+  else if (marketOpenNow() && Date.now() - lastMsg > 20000) forceReconnect('Back in view with a stale stream, reconnecting');
+});
+window.addEventListener('pagehide', persist);
+setInterval(persist, 20000);
+setInterval(() => { if (S) render(snapshot()); }, 2000);
+
+async function acquireWake() {
+  if (!cfg.keepAwake || !('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
+  try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+function releaseWake() { try { if (wakeLock) wakeLock.release(); } catch (e) {} wakeLock = null; }
+
+// ─── CSV export ───
+function exportCsv() {
+  if (!allTrades.length) { log('Nothing captured yet to export'); toast('No trades captured yet'); return; }
+  const q = v => { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const rows = ['timestamp,time_readable,occ_symbol,strike,type,expiration,dte,direction,price,bid,ask,size,premium'];
+  for (const t of allTrades) rows.push([t.time, t.time_str, t.occ, t.strike, t.type, t.expiration, t.dte, t.direction, t.price, t.bid, t.ask, t.size, t.premium].map(q).join(','));
+  const n = new Date();
+  const name = `flow_${S ? S.symbol : cfg.symbol}_${n.getFullYear()}${pad2(n.getMonth() + 1)}${pad2(n.getDate())}_${pad2(n.getHours())}${pad2(n.getMinutes())}${pad2(n.getSeconds())}.csv`;
+  const blob = new Blob([rows.join('\n') + '\n'], { type: 'text/csv' });
+  try {
+    const file = new File([blob], name, { type: 'text/csv' });
+    if (isTouch && navigator.canShare && navigator.canShare({ files: [file] })) { navigator.share({ files: [file] }).catch(() => {}); return; }
+  } catch (e) {}
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+function toast(msg) { const el = document.getElementById('toast'); el.textContent = msg; el.style.display = 'block'; clearTimeout(toast._t); toast._t = setTimeout(() => { el.style.display = 'none'; }, 2500); }
+
+// ─── Settings ───
+function openSettings(msg) {
+  const $ = id => document.getElementById(id);
+  $('set-msg').textContent = msg || ''; $('set-msg').style.display = msg ? 'block' : 'none';
+  $('set-token').value = ''; $('set-token').placeholder = token ? 'Saved. Paste to replace' : 'Paste your production token';
+  $('set-symbol').value = cfg.symbol; $('set-strikes').value = cfg.strikes; $('set-exps').value = cfg.expirations; $('set-awake').checked = !!cfg.keepAwake;
+  $('set-forget').style.display = token ? '' : 'none'; $('set-cancel').style.display = token ? '' : 'none';
+  $('settings').style.display = 'flex';
+}
+function closeSettings() { document.getElementById('settings').style.display = 'none'; }
+function saveSettings() {
+  const $ = id => document.getElementById(id);
+  const t = $('set-token').value.trim();
+  if (!t && !token) { $('set-msg').textContent = 'Paste your Tradier production token first.'; $('set-msg').style.display = 'block'; return; }
+  if (t) { token = t; if (!LS.set('flow_token', t)) log('Could not save the token on this phone; it will be asked for again next time'); }
+  const clamp = (v, lo, hi, d) => { v = parseInt(v, 10); return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d; };
+  cfg.symbol = ($('set-symbol').value || 'QQQ').toUpperCase().replace(/[^A-Z0-9.]/g, '').slice(0, 8) || 'QQQ';
+  cfg.strikes = clamp($('set-strikes').value, 2, 30, 10);
+  cfg.expirations = clamp($('set-exps').value, 1, 10, 6);
+  cfg.keepAwake = $('set-awake').checked;
+  LS.set('flow_cfg', JSON.stringify(cfg));
+  $('set-token').value = '';
+  closeSettings();
+  if (cfg.keepAwake) acquireWake(); else releaseWake();
+  start();
+}
+function forgetToken() {
+  stopStream(); token = ''; LS.del('flow_token');
+  if (S) setStatus('error', 'Token removed from this phone');
+  openSettings('Token removed from this phone.');
+}
+function clearData() {
+  LS.del('flow_state'); allTrades = []; pinnedTrades = []; pinnedFingerprints.clear(); dismissedFingerprints.clear();
+  closeSettings(); if (token) start();
+}
+function toggleDiag() {
+  const el = document.getElementById('diag'); const show = el.style.display === 'none';
+  el.style.display = show ? 'block' : 'none'; if (show) el.textContent = diagLines.join('\n') || 'Nothing logged yet.';
+}
+
+if (token) { acquireWake(); start(); } else openSettings('');
+</script>
+</body>
+</html>
