@@ -235,7 +235,11 @@
     <p>This page connects straight to Tradier from your phone. The token is saved only in this browser on this device and is sent only to Tradier.</p>
     <div id="set-msg"></div>
     <label for="set-token">Tradier production token</label>
-    <input id="set-token" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <div style="display:flex;gap:8px">
+      <input id="set-token" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" oninput="tokenHint()" style="flex:1;min-width:0">
+      <button class="tool-btn" id="set-show" type="button" onclick="toggleShowToken()" style="min-height:44px">Show</button>
+    </div>
+    <div id="set-hint" style="font-size:11px;color:#888;margin-top:5px;min-height:14px"></div>
     <div class="row3">
       <div><label for="set-symbol">Symbol</label><input id="set-symbol" type="text" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="8"></div>
       <div><label for="set-strikes">Strikes</label><input id="set-strikes" type="number" inputmode="numeric" min="2" max="30"></div>
@@ -1245,9 +1249,22 @@ async function start() {
   } catch (e) { return startFailed(e); }
   connect();
 }
+// A 401 can mean a bad token or a good token on an account without market data; the profile call tells them apart.
+async function explain401() {
+  let msg;
+  try {
+    await api('/user/profile');
+    msg = 'Tradier accepts this token, but is refusing market data for it. The account is probably still inactive, so wait for the deposit to clear or ask Tradier support.';
+  } catch (e2) {
+    msg = e2.status === 401
+      ? `Tradier does not recognize this token (${token.length} characters, ending in ${token.slice(-3)}). Check it against the Production token on the API Access page; it may have been regenerated, or be the sandbox one.`
+      : 'Tradier rejected the token for market data, and the follow-up check failed: ' + e2.message;
+  }
+  log(msg); openSettings(msg);
+}
 function startFailed(e) {
   stopped = true;
-  if (e.status === 401) { setStatus('error', 'Tradier rejected the token'); openSettings('Tradier rejected that token. Paste the production token (not the sandbox one) and try again.'); return; }
+  if (e.status === 401) { setStatus('error', 'Tradier rejected the token'); explain401(); return; }
   setStatus('error', e.message + '. Tap Restart to try again.');
 }
 
@@ -1286,7 +1303,7 @@ async function connect() {
       scheduleReconnect();
     };
   } catch (e) {
-    if (e.status === 401) { stopped = true; setStatus('error', 'Tradier rejected the token'); openSettings('Tradier rejected that token. Paste the production token (not the sandbox one) and try again.'); }
+    if (e.status === 401) { stopped = true; setStatus('error', 'Tradier rejected the token'); explain401(); }
     else { setStatus('error', e.message + ', retrying'); scheduleReconnect(); }
   } finally { connecting = false; }
 }
@@ -1347,15 +1364,24 @@ function toast(msg) { const el = document.getElementById('toast'); el.textConten
 function openSettings(msg) {
   const $ = id => document.getElementById(id);
   $('set-msg').textContent = msg || ''; $('set-msg').style.display = msg ? 'block' : 'none';
-  $('set-token').value = ''; $('set-token').placeholder = token ? 'Saved. Paste to replace' : 'Paste your production token';
+  $('set-token').value = ''; $('set-token').type = 'password'; $('set-show').textContent = 'Show'; $('set-hint').textContent = ''; $('set-token').placeholder = token ? 'Saved. Paste to replace' : 'Paste your production token';
   $('set-symbol').value = cfg.symbol; $('set-strikes').value = cfg.strikes; $('set-exps').value = cfg.expirations; $('set-awake').checked = !!cfg.keepAwake;
   $('set-forget').style.display = token ? '' : 'none'; $('set-cancel').style.display = token ? '' : 'none';
   $('settings').style.display = 'flex';
 }
+function cleanToken(v) { return String(v).replace(/[^A-Za-z0-9]/g, ''); }   // drops spaces, line breaks and invisible characters
+function tokenHint() {
+  const t = cleanToken(document.getElementById('set-token').value), el = document.getElementById('set-hint');
+  el.textContent = t ? `${t.length} characters, ending in ${t.slice(-3)}` : '';
+}
+function toggleShowToken() {
+  const el = document.getElementById('set-token'), show = el.type === 'password';
+  el.type = show ? 'text' : 'password'; document.getElementById('set-show').textContent = show ? 'Hide' : 'Show';
+}
 function closeSettings() { document.getElementById('settings').style.display = 'none'; }
 function saveSettings() {
   const $ = id => document.getElementById(id);
-  const t = $('set-token').value.trim();
+  const t = cleanToken($('set-token').value);
   if (!t && !token) { $('set-msg').textContent = 'Paste your Tradier production token first.'; $('set-msg').style.display = 'block'; return; }
   if (t) { token = t; if (!LS.set('flow_token', t)) log('Could not save the token on this phone; it will be asked for again next time'); }
   const clamp = (v, lo, hi, d) => { v = parseInt(v, 10); return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d; };
